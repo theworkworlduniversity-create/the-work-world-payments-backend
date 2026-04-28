@@ -1,0 +1,17 @@
+{
+  "name": "tww-payments-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.2",
+    "rss-parser": "^3.13.0",
+    "stripe": "^18.4.0"
+  }
+}
