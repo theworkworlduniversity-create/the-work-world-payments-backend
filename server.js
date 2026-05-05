@@ -8,8 +8,10 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
+
 const FRONTEND_URL = (process.env.FRONTEND_URL || '').trim();
 const ALLOWED_ORIGIN = (process.env.ALLOWED_ORIGIN || FRONTEND_URL || '').trim();
+
 const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY || '').trim();
 const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET || '').trim();
 const STRIPE_PRICE_MONTHLY = (process.env.STRIPE_PRICE_MONTHLY || '').trim();
@@ -44,12 +46,14 @@ function buildCorsOptions() {
         callback(null, true);
         return;
       }
+
       callback(new Error(`Origin ${origin} is not allowed.`));
     }
   };
 }
 
 app.use(cors(buildCorsOptions()));
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -77,12 +81,14 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
   }
 
   const signature = req.headers['stripe-signature'];
+
   if (!signature) {
     res.status(400).send('Missing Stripe signature header.');
     return;
   }
 
   let event;
+
   try {
     event = stripe.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET);
   } catch (error) {
@@ -117,10 +123,12 @@ app.post('/api/create-checkout-session', async (req, res) => {
       res.status(500).json({ error: `Missing Stripe price ID for ${normalizedPlan} plan.` });
       return;
     }
+
     if (!email || typeof email !== 'string') {
       res.status(400).json({ error: 'Billing email is required.' });
       return;
     }
+
     if (!FRONTEND_URL || isPlaceholder(FRONTEND_URL)) {
       res.status(500).json({ error: 'FRONTEND_URL is not configured on the backend.' });
       return;
@@ -172,6 +180,7 @@ app.post('/api/create-billing-portal-session', async (req, res) => {
       res.status(404).json({ error: 'No Stripe customer was found for this member yet.' });
       return;
     }
+
     if (!FRONTEND_URL || isPlaceholder(FRONTEND_URL)) {
       res.status(500).json({ error: 'FRONTEND_URL is not configured on the backend.' });
       return;
@@ -223,6 +232,7 @@ function getDb() {
 
 async function getCachedNews(limit) {
   const now = Date.now();
+
   if (newsCache.payload && newsCache.expiresAt > now) {
     return {
       ...newsCache.payload,
@@ -231,6 +241,7 @@ async function getCachedNews(limit) {
   }
 
   const items = await fetchAndRankNews();
+
   newsCache = {
     expiresAt: now + NEWS_CACHE_TTL_MS,
     payload: {
@@ -269,6 +280,7 @@ async function fetchAndRankNews() {
 async function loadFeedSafely(feedUrl) {
   try {
     const feed = await parser.parseURL(feedUrl);
+
     return {
       source: feed.title || 'AI Feed',
       items: (feed.items || []).map((item) => normalizeFeedItem(feed.title || 'AI Feed', item))
@@ -285,6 +297,7 @@ function normalizeFeedItem(feedTitle, item) {
   const source = inferSource(item, feedTitle);
   const publishedAt = item.isoDate || item.pubDate || new Date().toISOString();
   const score = scoreNewsItem(title, description, source, publishedAt);
+
   return {
     title,
     link: normalizeLink(item.link),
@@ -316,17 +329,20 @@ function inferSource(item, fallback) {
 
 function inferTag(title, source) {
   const haystack = `${title} ${source}`.toLowerCase();
+
   if (haystack.includes('openai')) return 'OpenAI';
   if (haystack.includes('anthropic')) return 'Anthropic';
   if (haystack.includes('deepmind') || haystack.includes('gemini') || haystack.includes('google')) return 'Google AI';
   if (haystack.includes('meta') || haystack.includes('llama')) return 'Meta AI';
   if (haystack.includes('mistral')) return 'Mistral';
   if (haystack.includes('agent')) return 'AI Agents';
+
   return 'AI';
 }
 
 function scoreNewsItem(title, description, source, publishedAt) {
   const haystack = `${title} ${description} ${source}`.toLowerCase();
+
   const signals = [
     ['openai', 12],
     ['anthropic', 12],
@@ -347,12 +363,17 @@ function scoreNewsItem(title, description, source, publishedAt) {
   ];
 
   let total = 0;
+
   for (const [needle, points] of signals) {
     if (haystack.includes(needle)) total += points;
   }
 
   const publishedTime = new Date().getTime() - new Date(publishedAt || 0).getTime();
-  if (!Number.isNaN(publishedTime) && publishedTime < 3 * 24 * 60 * 60 * 1000) total += 5;
+
+  if (!Number.isNaN(publishedTime) && publishedTime < 3 * 24 * 60 * 60 * 1000) {
+    total += 5;
+  }
+
   return total;
 }
 
@@ -380,38 +401,55 @@ async function handleStripeEvent(event) {
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object;
-      const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+      const subscriptionId = typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription?.id;
+
       let subscription = null;
+
       if (subscriptionId) {
         subscription = await stripe.subscriptions.retrieve(subscriptionId);
       }
+
       await upsertProfileFromStripe({
         session,
         subscription,
         fallbackStatus: 'active'
       });
+
       return;
     }
+
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
       const subscription = event.data.object;
+
       await upsertProfileFromStripe({
         subscription,
         fallbackStatus: subscription.status || 'inactive'
       });
+
       return;
     }
+
     case 'invoice.payment_failed': {
       const invoice = event.data.object;
-      const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+      const subscriptionId = typeof invoice.subscription === 'string'
+        ? invoice.subscription
+        : invoice.subscription?.id;
+
       if (!subscriptionId) return;
+
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
       await upsertProfileFromStripe({
         subscription,
         fallbackStatus: 'past_due'
       });
+
       return;
     }
+
     default:
       return;
   }
@@ -419,6 +457,7 @@ async function handleStripeEvent(event) {
 
 async function upsertProfileFromStripe({ session = null, subscription = null, fallbackStatus = 'inactive' }) {
   const db = getDb();
+
   if (!db) {
     throw new Error('Firebase Admin is not configured. Add FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY.');
   }
@@ -427,25 +466,73 @@ async function upsertProfileFromStripe({ session = null, subscription = null, fa
   const subscriptionMetadata = subscription?.metadata || {};
   const metadata = { ...sessionMetadata, ...subscriptionMetadata };
 
-  const firebaseUid = metadata.firebaseUid || session?.client_reference_id || '';
-  const email = metadata.email || session?.customer_details?.email || session?.customer_email || '';
-  const fullName = metadata.name || session?.customer_details?.name || '';
   const stripeCustomerId = subscription?.customer || session?.customer || '';
-  const stripeSubscriptionId = subscription?.id || (typeof session?.subscription === 'string' ? session.subscription : session?.subscription?.id) || '';
+  const stripeSubscriptionId = subscription?.id || (
+    typeof session?.subscription === 'string'
+      ? session.subscription
+      : session?.subscription?.id
+  ) || '';
+
   const stripePriceId = subscription?.items?.data?.[0]?.price?.id || '';
   const billingPeriod = metadata.plan || inferBillingPeriodFromPriceId(stripePriceId);
   const membershipStatus = mapStripeStatus(subscription?.status || fallbackStatus);
 
+  const firebaseUid = (
+    metadata.firebaseUid ||
+    session?.client_reference_id ||
+    subscriptionMetadata?.firebaseUid ||
+    ''
+  ).toString().trim();
+
+  const email = (
+    metadata.email ||
+    session?.customer_details?.email ||
+    session?.customer_email ||
+    subscription?.customer_email ||
+    ''
+  ).toString().trim().toLowerCase();
+
+  const fullName = (
+    metadata.name ||
+    session?.customer_details?.name ||
+    ''
+  ).toString().trim();
+
   let docRef = null;
+
   if (firebaseUid) {
-    docRef = db.collection('profiles').doc(firebaseUid);
-  } else if (email) {
-    const snap = await db.collection('profiles').where('email', '==', email).limit(1).get();
-    if (!snap.empty) docRef = snap.docs[0].ref;
+    const direct = await db.collection('profiles').doc(firebaseUid).get();
+    if (direct.exists) {
+      docRef = direct.ref;
+    }
+  }
+
+  if (!docRef && email) {
+    const snap = await db.collection('profiles')
+      .where('email', '==', email)
+      .limit(1)
+      .get();
+
+    if (!snap.empty) {
+      docRef = snap.docs[0].ref;
+    }
+  }
+
+  if (!docRef && stripeCustomerId) {
+    const snap = await db.collection('profiles')
+      .where('stripeCustomerId', '==', stripeCustomerId)
+      .limit(1)
+      .get();
+
+    if (!snap.empty) {
+      docRef = snap.docs[0].ref;
+    }
   }
 
   if (!docRef) {
-    throw new Error(`Could not resolve a Firebase profile for the paid member. firebaseUid=${firebaseUid || 'none'} email=${email || 'none'}`);
+    throw new Error(
+      `Could not resolve a Firebase profile for the paid member. uid=${firebaseUid || 'none'} email=${email || 'none'} stripeCustomerId=${stripeCustomerId || 'none'}`
+    );
   }
 
   await docRef.set({
@@ -472,6 +559,7 @@ function inferBillingPeriodFromPriceId(priceId) {
 
 async function findProfile({ firebaseUid, email }) {
   const db = getDb();
+
   if (!db) {
     throw new Error('Firebase Admin is not configured on the backend.');
   }
@@ -482,7 +570,11 @@ async function findProfile({ firebaseUid, email }) {
   }
 
   if (email) {
-    const snap = await db.collection('profiles').where('email', '==', email).limit(1).get();
+    const snap = await db.collection('profiles')
+      .where('email', '==', email)
+      .limit(1)
+      .get();
+
     if (!snap.empty) return { id: snap.docs[0].id, ...snap.docs[0].data() };
   }
 
