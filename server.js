@@ -8,10 +8,8 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
-
 const FRONTEND_URL = (process.env.FRONTEND_URL || '').trim();
 const ALLOWED_ORIGIN = (process.env.ALLOWED_ORIGIN || FRONTEND_URL || '').trim();
-
 const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY || '').trim();
 const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET || '').trim();
 const STRIPE_PRICE_MONTHLY = (process.env.STRIPE_PRICE_MONTHLY || '').trim();
@@ -52,7 +50,6 @@ function buildCorsOptions() {
 }
 
 app.use(cors(buildCorsOptions()));
-
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -321,7 +318,8 @@ function inferTag(title, source) {
   const haystack = `${title} ${source}`.toLowerCase();
   if (haystack.includes('openai')) return 'OpenAI';
   if (haystack.includes('anthropic')) return 'Anthropic';
-  if (haystack.includes('deepmind') || haystack.includes('google ai')) return 'Google DeepMind';
+  if (haystack.includes('deepmind') || haystack.includes('gemini') || haystack.includes('google')) return 'Google AI';
+  if (haystack.includes('meta') || haystack.includes('llama')) return 'Meta AI';
   if (haystack.includes('mistral')) return 'Mistral';
   if (haystack.includes('agent')) return 'AI Agents';
   return 'AI';
@@ -435,8 +433,21 @@ async function upsertProfileFromStripe({ session = null, subscription = null, fa
   const billingPeriod = metadata.plan || inferBillingPeriodFromPriceId(stripePriceId);
   const membershipStatus = mapStripeStatus(subscription?.status || fallbackStatus);
 
-  const firebaseUid = (metadata.firebaseUid || session?.client_reference_id || subscriptionMetadata?.firebaseUid || '').toString().trim();
-  const email = (metadata.email || session?.customer_details?.email || session?.customer_email || subscription?.customer_email || '').toString().trim().toLowerCase();
+  const firebaseUid = (
+    metadata.firebaseUid ||
+    session?.client_reference_id ||
+    subscriptionMetadata?.firebaseUid ||
+    ''
+  ).toString().trim();
+
+  const email = (
+    metadata.email ||
+    session?.customer_details?.email ||
+    session?.customer_email ||
+    subscription?.customer_email ||
+    ''
+  ).toString().trim().toLowerCase();
+
   const fullName = (metadata.name || session?.customer_details?.name || '').toString().trim();
 
   let docRef = null;
@@ -499,11 +510,3 @@ async function findProfile({ firebaseUid, email }) {
 
   return null;
 }
-
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong.'
-  });
-});
